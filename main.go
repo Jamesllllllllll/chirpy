@@ -95,14 +95,16 @@ func main() {
 	}
 	apiCfg.fileserverHits.Store(0)
 
-	fs := http.FileServer(http.Dir("./"))
-	handler := http.StripPrefix("/app/", fs)
-	mux.Handle("/app/", apiCfg.middwareMetricsInc(handler))
-
-	mux.HandleFunc("OPTIONS /{any...}", func(w http.ResponseWriter, r *http.Request) {
+	// First register the OPTIONS handler for API routes only
+	mux.HandleFunc("OPTIONS /api/", func(w http.ResponseWriter, r *http.Request) {
 		enableCors(&w)
 		w.WriteHeader(http.StatusOK)
 	})
+
+	// Then register the file server
+	fs := http.FileServer(http.Dir("./"))
+	handler := http.StripPrefix("/app/", fs)
+	mux.Handle("/app/", apiCfg.middwareMetricsInc(handler))
 
 	mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, req *http.Request) {
 		req.Header.Add("Content-Type", "text/plain; charset=utf8")
