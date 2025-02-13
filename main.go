@@ -179,7 +179,7 @@ func main() {
 		allChirps, err := apiCfg.databaseQueries.GetAllChirps(req.Context())
 		if err != nil {
 			fmt.Print("error getting chirps:", err)
-			respondWithError(w, 500, "Error creating chirp")
+			respondWithError(w, 500, "Error getting chirps")
 			return
 		}
 		formattedChirps := make([]singleChirp, len(allChirps))
