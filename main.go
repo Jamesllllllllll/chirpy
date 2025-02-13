@@ -36,6 +36,7 @@ type User struct {
 	Token        string    `json:"token"`
 	RefreshToken string    `json:"refresh_token"`
 	IsChirpyRed  bool      `json:"is_chirpy_red"`
+	Username     string    `json:"username"`
 }
 
 type singleChirp struct {
@@ -44,6 +45,7 @@ type singleChirp struct {
 	UpdatedAt time.Time `json:"updated_at"`
 	Body      string    `json:"body"`
 	UserID    string    `json:"user_id"`
+	Username  string    `json:"username"`
 }
 
 func (cfg *apiConfig) middwareMetricsInc(next http.Handler) http.Handler {
@@ -67,6 +69,12 @@ func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) error
 
 func respondWithError(w http.ResponseWriter, code int, msg string) error {
 	return respondWithJSON(w, code, map[string]string{"error": msg})
+}
+
+func enableCors(w *http.ResponseWriter) {
+	(*w).Header().Set("Access-Control-Allow-Origin", "*")
+	(*w).Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE")
+	(*w).Header().Set("Access-Control-Allow-Headers", "Content-Type, Access-Control-Allow-Headers, Authorization, X-Requested-With")
 }
 
 func main() {
@@ -159,6 +167,7 @@ func main() {
 					UpdatedAt: chirp.UpdatedAt,
 					Body:      chirp.Body,
 					UserID:    chirp.UserID.String(),
+					Username:  chirp.Username,
 				}
 			}
 			if sortQ == "desc" {
@@ -181,6 +190,7 @@ func main() {
 				UpdatedAt: chirp.UpdatedAt,
 				Body:      chirp.Body,
 				UserID:    chirp.UserID.String(),
+				Username:  chirp.Username,
 			}
 		}
 		if sortQ == "desc" {
@@ -263,10 +273,17 @@ func main() {
 			return
 		}
 
+		user, err := apiCfg.databaseQueries.FindUserById(req.Context(), userID)
+		if err != nil {
+			respondWithError(w, 404, "Not found")
+			return
+		}
+
 		type parameters struct {
 			// these tags indicate how the keys in the JSON should be mapped to the struct fields
 			// the struct fields must be exported (start with a capital letter) if you want them parsed
-			Body string `json:"body"`
+			Body     string `json:"body"`
+			UserName string `json:"username"`
 			// UserID string `json:"user_id"`
 		}
 
@@ -305,6 +322,7 @@ func main() {
 		chirpParams := database.CreateChirpParams{
 			Body:   strings.Join(words, " "),
 			UserID: userID,
+			Username: user.Username,
 		}
 
 		chirp, err := apiCfg.databaseQueries.CreateChirp(req.Context(), chirpParams)
@@ -326,7 +344,9 @@ func main() {
 	})
 
 	mux.HandleFunc("POST /api/users", func(w http.ResponseWriter, req *http.Request) {
+		enableCors(&w)
 		type parameters struct {
+			Username string `json:"username"`
 			Password string `json:"password"`
 			Email    string `json:"email"`
 		}
@@ -348,6 +368,7 @@ func main() {
 		}
 
 		createUserParams := database.CreateUserParams{
+			Username:       params.Username,
 			Email:          params.Email,
 			HashedPassword: hashed_password,
 		}
@@ -363,6 +384,7 @@ func main() {
 			CreatedAt: user.CreatedAt,
 			UpdatedAt: user.UpdatedAt,
 			Email:     user.Email,
+			Username:  user.Username,
 		}
 		respondWithJSON(w, 201, response)
 	})

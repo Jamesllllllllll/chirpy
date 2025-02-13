@@ -17,6 +17,7 @@ type Chirp struct {
 	UpdatedAt time.Time
 	Body      string
 	UserID    uuid.UUID
+	Username  string
 }
 
 type RefreshToken struct {
@@ -35,4 +36,5 @@ type User struct {
 	Email          string
 	HashedPassword string
 	IsChirpyRed    bool
+	Username       string
 }

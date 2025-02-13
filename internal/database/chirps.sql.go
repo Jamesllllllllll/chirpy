@@ -12,20 +12,21 @@ import (
 )
 
 const createChirp = `-- name: CreateChirp :one
-INSERT INTO chirps (id, created_at, updated_at, body, user_id)
+INSERT INTO chirps (id, created_at, updated_at, body, user_id, username)
 VALUES (
-    gen_random_uuid(), NOW(), NOW(), $1, $2
+    gen_random_uuid(), NOW(), NOW(), $1, $2, $3
 )
-RETURNING id, created_at, updated_at, body, user_id
+RETURNING id, created_at, updated_at, body, user_id, username
 `
 
 type CreateChirpParams struct {
-	Body   string
-	UserID uuid.UUID
+	Body     string
+	UserID   uuid.UUID
+	Username string
 }
 
 func (q *Queries) CreateChirp(ctx context.Context, arg CreateChirpParams) (Chirp, error) {
-	row := q.db.QueryRowContext(ctx, createChirp, arg.Body, arg.UserID)
+	row := q.db.QueryRowContext(ctx, createChirp, arg.Body, arg.UserID, arg.Username)
 	var i Chirp
 	err := row.Scan(
 		&i.ID,
@@ -33,6 +34,7 @@ func (q *Queries) CreateChirp(ctx context.Context, arg CreateChirpParams) (Chirp
 		&i.UpdatedAt,
 		&i.Body,
 		&i.UserID,
+		&i.Username,
 	)
 	return i, err
 }
@@ -57,7 +59,7 @@ func (q *Queries) DeleteSingleChrip(ctx context.Context, id uuid.UUID) error {
 }
 
 const getAllChirps = `-- name: GetAllChirps :many
-SELECT id, created_at, updated_at, body, user_id FROM chirps
+SELECT id, created_at, updated_at, body, user_id, username FROM chirps
 ORDER BY created_at ASC
 `
 
@@ -76,6 +78,7 @@ func (q *Queries) GetAllChirps(ctx context.Context) ([]Chirp, error) {
 			&i.UpdatedAt,
 			&i.Body,
 			&i.UserID,
+			&i.Username,
 		); err != nil {
 			return nil, err
 		}
@@ -91,7 +94,7 @@ func (q *Queries) GetAllChirps(ctx context.Context) ([]Chirp, error) {
 }
 
 const getChirpsByAuthor = `-- name: GetChirpsByAuthor :many
-SELECT id, created_at, updated_at, body, user_id FROM chirps
+SELECT id, created_at, updated_at, body, user_id, username FROM chirps
 WHERE user_id = $1
 ORDER BY created_at ASC
 `
@@ -111,6 +114,7 @@ func (q *Queries) GetChirpsByAuthor(ctx context.Context, userID uuid.UUID) ([]Ch
 			&i.UpdatedAt,
 			&i.Body,
 			&i.UserID,
+			&i.Username,
 		); err != nil {
 			return nil, err
 		}
@@ -126,7 +130,7 @@ func (q *Queries) GetChirpsByAuthor(ctx context.Context, userID uuid.UUID) ([]Ch
 }
 
 const getSingleChirp = `-- name: GetSingleChirp :one
-SELECT id, created_at, updated_at, body, user_id FROM chirps
+SELECT id, created_at, updated_at, body, user_id, username FROM chirps
 WHERE ID = $1
 `
 
@@ -139,6 +143,7 @@ func (q *Queries) GetSingleChirp(ctx context.Context, id uuid.UUID) (Chirp, erro
 		&i.UpdatedAt,
 		&i.Body,
 		&i.UserID,
+		&i.Username,
 	)
 	return i, err
 }
