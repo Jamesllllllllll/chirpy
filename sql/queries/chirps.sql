@@ -12,6 +12,15 @@ TRUNCATE chirps;
 SELECT * FROM chirps
 ORDER BY created_at ASC;
 
+-- name: GetChirpsByAuthor :many
+SELECT * FROM chirps
+WHERE user_id = $1
+ORDER BY created_at ASC;
+
 -- name: GetSingleChirp :one
 SELECT * FROM chirps
+WHERE ID = $1;
+
+-- name: DeleteSingleChrip :exec
+DELETE FROM chirps
 WHERE ID = $1;

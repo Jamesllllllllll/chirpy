@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -23,13 +24,18 @@ type apiConfig struct {
 	fileserverHits  atomic.Int32
 	databaseQueries *database.Queries
 	platform        string
+	secret          string
+	polkaKey        string
 }
 
 type User struct {
-	ID        uuid.UUID `json:"id"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-	Email     string    `json:"email"`
+	ID           uuid.UUID `json:"id"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+	Email        string    `json:"email"`
+	Token        string    `json:"token"`
+	RefreshToken string    `json:"refresh_token"`
+	IsChirpyRed  bool      `json:"is_chirpy_red"`
 }
 
 type singleChirp struct {
@@ -66,7 +72,6 @@ func respondWithError(w http.ResponseWriter, code int, msg string) error {
 func main() {
 	godotenv.Load()
 	dbURL := os.Getenv("DB_URL")
-
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
 		log.Fatal("error connecting to database")
@@ -77,6 +82,8 @@ func main() {
 	apiCfg := apiConfig{
 		databaseQueries: database.New(db),
 		platform:        os.Getenv("PLATFORM"),
+		secret:          os.Getenv("SECRET"),
+		polkaKey:        os.Getenv("POLKA_KEY"),
 	}
 	apiCfg.fileserverHits.Store(0)
 
@@ -131,6 +138,35 @@ func main() {
 	})
 
 	mux.HandleFunc("GET /api/chirps", func(w http.ResponseWriter, req *http.Request) {
+		authorID := req.URL.Query().Get("author_id")
+		sortQ := req.URL.Query().Get("sort")
+		if authorID != "" {
+			userID, err := uuid.Parse(authorID)
+			if err != nil {
+				respondWithError(w, 404, "Error parsing user ID")
+				return
+			}
+			authorChirps, err := apiCfg.databaseQueries.GetChirpsByAuthor(req.Context(), userID)
+			if err != nil {
+				respondWithError(w, 204, "no chirps found for user")
+				return
+			}
+			formattedChirps := make([]singleChirp, len(authorChirps))
+			for i, chirp := range authorChirps {
+				formattedChirps[i] = singleChirp{
+					ID:        chirp.ID.String(),
+					CreatedAt: chirp.CreatedAt,
+					UpdatedAt: chirp.UpdatedAt,
+					Body:      chirp.Body,
+					UserID:    chirp.UserID.String(),
+				}
+			}
+			if sortQ == "desc" {
+				sort.Slice(formattedChirps, func(i, j int) bool { return formattedChirps[i].CreatedAt.After(formattedChirps[j].CreatedAt) })
+			}
+			respondWithJSON(w, 200, formattedChirps)
+			return
+		}
 		allChirps, err := apiCfg.databaseQueries.GetAllChirps(req.Context())
 		if err != nil {
 			fmt.Print("error getting chirps:", err)
@@ -146,6 +182,9 @@ func main() {
 				Body:      chirp.Body,
 				UserID:    chirp.UserID.String(),
 			}
+		}
+		if sortQ == "desc" {
+			sort.Slice(formattedChirps, func(i, j int) bool { return formattedChirps[i].CreatedAt.After(formattedChirps[j].CreatedAt) })
 		}
 		respondWithJSON(w, 200, formattedChirps)
 	})
@@ -172,18 +211,69 @@ func main() {
 		respondWithJSON(w, 200, respBody)
 	})
 
+	mux.HandleFunc("DELETE /api/chirps/{chirpID}", func(w http.ResponseWriter, req *http.Request) {
+		token, err := auth.GetBearerToken(req.Header)
+		if err != nil {
+			respondWithError(w, 401, "Unauthorized")
+			return
+		}
+
+		userID, validateErr := auth.ValidateJWT(token, apiCfg.secret)
+		if validateErr != nil {
+			respondWithError(w, 401, "Unauthorized")
+			return
+		}
+
+		id, err := uuid.Parse(req.PathValue("chirpID"))
+		if err != nil {
+			respondWithError(w, 500, "Error with chirp ID")
+			return
+		}
+
+		chirp, err := apiCfg.databaseQueries.GetSingleChirp(req.Context(), id)
+		if err != nil {
+			respondWithError(w, 404, "Not found")
+			return
+		}
+		if chirp.UserID != userID {
+			respondWithError(w, 403, "Unauthorized")
+			return
+		}
+
+		deleteErr := apiCfg.databaseQueries.DeleteSingleChrip(req.Context(), id)
+		if deleteErr != nil {
+			fmt.Println("Error deleting chirp:", err)
+			respondWithError(w, 404, "Not Found")
+			return
+		}
+
+		respondWithJSON(w, 204, nil)
+	})
+
 	mux.HandleFunc("POST /api/chirps", func(w http.ResponseWriter, req *http.Request) {
+		token, err := auth.GetBearerToken(req.Header)
+		if err != nil {
+			respondWithError(w, 401, "Unauthorized")
+			return
+		}
+
+		userID, err := auth.ValidateJWT(token, apiCfg.secret)
+		if err != nil {
+			respondWithError(w, 401, "Unauthorized")
+			return
+		}
+
 		type parameters struct {
 			// these tags indicate how the keys in the JSON should be mapped to the struct fields
 			// the struct fields must be exported (start with a capital letter) if you want them parsed
-			Body   string `json:"body"`
-			UserID string `json:"user_id"`
+			Body string `json:"body"`
+			// UserID string `json:"user_id"`
 		}
 
 		decoder := json.NewDecoder(req.Body)
 		params := parameters{}
-		err := decoder.Decode(&params)
-		if err != nil {
+		decodeErr := decoder.Decode(&params)
+		if decodeErr != nil {
 			// an error will be thrown if the JSON is invalid or has the wrong types
 			// any missing fields will simply have their values in the struct set to their zero value
 			log.Printf("Error decoding parameters: %s", err)
@@ -206,15 +296,15 @@ func main() {
 			}
 		}
 
-		userUUID, err := uuid.Parse(params.UserID)
-		if err != nil {
-			respondWithError(w, 400, "Problem with user ID")
-			return
-		}
+		// userUUID, err := uuid.Parse(params.UserID)
+		// if err != nil {
+		// 	respondWithError(w, 400, "Problem with user ID")
+		// 	return
+		// }
 
 		chirpParams := database.CreateChirpParams{
 			Body:   strings.Join(words, " "),
-			UserID: userUUID,
+			UserID: userID,
 		}
 
 		chirp, err := apiCfg.databaseQueries.CreateChirp(req.Context(), chirpParams)
@@ -229,7 +319,7 @@ func main() {
 			CreatedAt: chirp.CreatedAt,
 			UpdatedAt: chirp.UpdatedAt,
 			Body:      strings.Join(words, " "),
-			UserID:    params.UserID,
+			UserID:    userID.String(),
 		}
 		respondWithJSON(w, 201, respBody)
 
@@ -277,6 +367,109 @@ func main() {
 		respondWithJSON(w, 201, response)
 	})
 
+	mux.HandleFunc("PUT /api/users", func(w http.ResponseWriter, req *http.Request) {
+		token, err := auth.GetBearerToken(req.Header)
+		if err != nil {
+			respondWithError(w, 401, "Unauthorized")
+			return
+		}
+
+		userID, err := auth.ValidateJWT(token, apiCfg.secret)
+		if err != nil {
+			respondWithError(w, 401, "Unauthorized")
+			return
+		}
+
+		type parameters struct {
+			Password string `json:"password"`
+			Email    string `json:"email"`
+		}
+
+		decoder := json.NewDecoder(req.Body)
+		params := parameters{}
+		decodeErr := decoder.Decode(&params)
+		if decodeErr != nil {
+			log.Printf("Error decoding parameters: %s", err)
+			w.WriteHeader(500)
+			return
+		}
+
+		hashed_password, err := auth.HashPassword(params.Password)
+		if err != nil {
+			log.Printf("Error hashing password: %s", err)
+			respondWithError(w, 500, "Error hashing password")
+			return
+		}
+
+		updateUserParams := database.UpdateUserParams{
+			ID:             userID,
+			Email:          params.Email,
+			HashedPassword: hashed_password,
+		}
+		user, err := apiCfg.databaseQueries.UpdateUser(req.Context(), updateUserParams)
+		if err != nil {
+			fmt.Print("error updating user:", err)
+			respondWithError(w, 500, "Error updating user")
+			return
+		}
+
+		response := User{
+			ID:        user.ID,
+			CreatedAt: user.CreatedAt,
+			UpdatedAt: user.UpdatedAt,
+			Email:     user.Email,
+		}
+		respondWithJSON(w, 200, response)
+	})
+
+	mux.HandleFunc("POST /api/polka/webhooks", func(w http.ResponseWriter, req *http.Request) {
+		type parameters struct {
+			Event string `json:"event"`
+			Data  struct {
+				UserID string `json:"user_id"`
+			} `json:"data"`
+		}
+
+		apiKey, err := auth.GetAPIKey(req.Header)
+		if err != nil {
+			respondWithError(w, 401, "unauthorized")
+			return
+		}
+
+		if apiKey != apiCfg.polkaKey {
+			respondWithError(w, 401, "unauthorized")
+			return
+		}
+
+		decoder := json.NewDecoder(req.Body)
+		params := parameters{}
+		decodeErr := decoder.Decode(&params)
+		if decodeErr != nil {
+			log.Printf("Error decoding parameters: %s", err)
+			w.WriteHeader(500)
+			return
+		}
+
+		if params.Event != "user.upgraded" {
+			respondWithError(w, 204, "no content")
+			return
+		}
+
+		userID, err := uuid.Parse(params.Data.UserID)
+		if err != nil {
+			respondWithError(w, 500, "error parsing user ID")
+			return
+		}
+
+		user, err := apiCfg.databaseQueries.UpgradeUser(req.Context(), userID)
+		if err != nil {
+			respondWithError(w, 404, "not found")
+			return
+		}
+
+		respondWithJSON(w, 204, user)
+	})
+
 	mux.HandleFunc("POST /api/login", func(w http.ResponseWriter, req *http.Request) {
 		type parameters struct {
 			Password string `json:"password"`
@@ -306,13 +499,95 @@ func main() {
 			return
 		}
 
-		response := User{
-			ID:        user.ID,
-			CreatedAt: user.CreatedAt,
-			UpdatedAt: user.UpdatedAt,
-			Email:     user.Email,
+		token, err := auth.MakeJWT(user.ID, apiCfg.secret, time.Second*time.Duration(3600))
+		if err != nil {
+			respondWithError(w, 500, "error creating JWT")
 		}
+
+		refreshToken, err := auth.MakeRefreshToken()
+		if err != nil {
+			respondWithError(w, 500, "error creating refresh token")
+		}
+
+		response := User{
+			ID:           user.ID,
+			CreatedAt:    user.CreatedAt,
+			UpdatedAt:    user.UpdatedAt,
+			Email:        user.Email,
+			Token:        token,
+			RefreshToken: refreshToken,
+			IsChirpyRed:  user.IsChirpyRed,
+		}
+
+		saveRefreshTokenParams := database.SaveRefreshTokenParams{
+			Token:     refreshToken,
+			UserID:    user.ID,
+			ExpiresAt: time.Now().Add(time.Hour * time.Duration(1140)),
+		}
+
+		apiCfg.databaseQueries.SaveRefreshToken(req.Context(), saveRefreshTokenParams)
+
 		respondWithJSON(w, 200, response)
+	})
+
+	mux.HandleFunc("POST /api/refresh", func(w http.ResponseWriter, req *http.Request) {
+		refreshToken, err := auth.GetBearerToken(req.Header)
+		if err != nil {
+			respondWithError(w, 401, "unauthorized")
+			return
+		}
+		fmt.Println("Token in /api/refresh:", refreshToken)
+
+		dbToken, err := apiCfg.databaseQueries.LookupRefreshToken(req.Context(), refreshToken)
+		if err != nil {
+			respondWithError(w, 401, "unauthorized")
+			return
+		}
+
+		fmt.Println("REVOKED AT:", dbToken.RevokedAt.Valid)
+
+		if dbToken.ExpiresAt.Before(time.Now()) || dbToken.RevokedAt.Valid {
+			respondWithError(w, 401, "unauthorized")
+			return
+		}
+
+		newAccessToken, err := auth.MakeJWT(dbToken.UserID, apiCfg.secret, time.Second*time.Duration(3600))
+		if err != nil {
+			respondWithError(w, 500, "error creating JWT")
+			return
+		}
+
+		fmt.Println("Refresh token:", refreshToken)
+		fmt.Println("New access token:", newAccessToken)
+
+		// response := struct {
+		// 	Token string
+		// }{
+		// 	Token: newAccessToken,
+		// }
+
+		type simpleTokenResponse struct {
+			Token string `json:"token"`
+		}
+
+		response := simpleTokenResponse{
+			Token: newAccessToken,
+		}
+		fmt.Println("This should be the new token:", response)
+		respondWithJSON(w, 200, response)
+	})
+
+	mux.HandleFunc("POST /api/revoke", func(w http.ResponseWriter, req *http.Request) {
+		token, err := auth.GetBearerToken(req.Header)
+		if err != nil {
+			respondWithError(w, 401, "unauthorized")
+		}
+
+		response, err := apiCfg.databaseQueries.RevokeToken(req.Context(), token)
+		if err != nil {
+			respondWithError(w, 404, "not found")
+		}
+		respondWithJSON(w, 204, response)
 	})
 
 	server := http.Server{

@@ -1,11 +1,17 @@
 package auth
 
 import (
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
 	"fmt"
+	"net/http"
+	"strings"
+	"time"
+
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
-	"time"
 )
 
 func HashPassword(password string) (string, error) {
@@ -36,11 +42,12 @@ func MakeJWT(userID uuid.UUID, tokenSecret string, expiresIn time.Duration) (str
 }
 
 func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) {
+	fmt.Println("Validating token:", tokenString)
 	token, err := jwt.ParseWithClaims(tokenString, &jwt.RegisteredClaims{}, func(token *jwt.Token) (interface{}, error) {
 		return []byte(tokenSecret), nil
 	})
 	if err != nil {
-		fmt.Println("Error validating token", err)
+		fmt.Print("\n\nError validating token:", err, "\n\n")
 		return uuid.Nil, err
 	}
 
@@ -56,4 +63,32 @@ func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) {
 	}
 
 	return userUUID, nil
+}
+
+func GetBearerToken(headers http.Header) (string, error) {
+	auth := headers.Get("Authorization")
+	if len(auth) == 0 {
+		return "", errors.New("no authorization header")
+	}
+	if !strings.Contains(auth, "Bearer ") {
+		return "", errors.New("auth header does not include 'Bearer '")
+	}
+	token := strings.Replace(auth, "Bearer ", "", 1)
+	return token, nil
+}
+
+func MakeRefreshToken() (string, error) {
+	token := make([]byte, 32)
+	rand.Read(token)
+	str := hex.EncodeToString(token)
+	return str, nil
+}
+
+func GetAPIKey(headers http.Header) (string, error) {
+	auth := headers.Get("Authorization")
+	if auth == "" {
+		return "", errors.New("not authorized")
+	}
+	apiKey := strings.Replace(auth, "ApiKey ", "", 1)
+	return apiKey, nil
 }
