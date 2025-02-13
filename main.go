@@ -74,7 +74,7 @@ func respondWithError(w http.ResponseWriter, code int, msg string) error {
 func enableCors(w *http.ResponseWriter) {
 	(*w).Header().Set("Access-Control-Allow-Origin", "*")
 	(*w).Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE")
-	(*w).Header().Set("Access-Control-Allow-Headers", "Content-Type, Access-Control-Allow-Headers, Authorization, X-Requested-With")
+	(*w).Header().Set("Access-Control-Allow-Headers", "*")
 }
 
 func main() {
@@ -98,6 +98,11 @@ func main() {
 	fs := http.FileServer(http.Dir("./"))
 	handler := http.StripPrefix("/app/", fs)
 	mux.Handle("/app/", apiCfg.middwareMetricsInc(handler))
+
+	mux.HandleFunc("OPTIONS /{any...}", func(w http.ResponseWriter, r *http.Request) {
+		enableCors(&w)
+		w.WriteHeader(http.StatusOK)
+	})
 
 	mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, req *http.Request) {
 		req.Header.Add("Content-Type", "text/plain; charset=utf8")
@@ -320,8 +325,8 @@ func main() {
 		// }
 
 		chirpParams := database.CreateChirpParams{
-			Body:   strings.Join(words, " "),
-			UserID: userID,
+			Body:     strings.Join(words, " "),
+			UserID:   userID,
 			Username: user.Username,
 		}
 
