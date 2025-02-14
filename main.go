@@ -580,6 +580,7 @@ func main() {
 
 		dbToken, err := apiCfg.databaseQueries.LookupRefreshToken(req.Context(), refreshToken)
 		if err != nil {
+			fmt.Println("Error looking up refresh token:", err)
 			respondWithError(w, 401, "unauthorized")
 			return
 		}
@@ -587,6 +588,7 @@ func main() {
 		fmt.Println("REVOKED AT:", dbToken.RevokedAt.Valid)
 
 		if dbToken.ExpiresAt.Before(time.Now()) || dbToken.RevokedAt.Valid {
+			fmt.Println("Token expired or revoked")
 			respondWithError(w, 401, "unauthorized")
 			return
 		}
