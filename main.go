@@ -12,9 +12,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/TwiN/go-away"
 	"github.com/Jamesllllllllll/chirpy/internal/auth"
 	"github.com/Jamesllllllllll/chirpy/internal/database"
+	goaway "github.com/TwiN/go-away"
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
@@ -621,6 +621,36 @@ func main() {
 			respondWithError(w, 404, "not found")
 		}
 		respondWithJSON(w, 204, response)
+	})
+
+	mux.HandleFunc("/api/getuser", func(w http.ResponseWriter, req *http.Request) {
+		enableCors(&w)
+		token, err := auth.GetBearerToken(req.Header)
+		if err != nil {
+			respondWithError(w, 401, "unauthorized")
+			return
+		}
+
+		userID, err := auth.ValidateJWT(token, apiCfg.secret)
+		if err != nil {
+			respondWithError(w, 401, "unauthorized")
+			return
+		}
+
+		user, err := apiCfg.databaseQueries.FindUserById(req.Context(), userID)
+		if err != nil {
+			respondWithError(w, 404, "user not found")
+			return
+		}
+
+		response := User{
+			ID:        user.ID,
+			CreatedAt: user.CreatedAt,
+			UpdatedAt: user.UpdatedAt,
+			Email:     user.Email,
+			Username:  user.Username,
+		}
+		respondWithJSON(w, 200, response)
 	})
 
 	server := http.Server{
