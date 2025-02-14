@@ -71,10 +71,20 @@ func respondWithError(w http.ResponseWriter, code int, msg string) error {
 	return respondWithJSON(w, code, map[string]string{"error": msg})
 }
 
-func enableCors(w *http.ResponseWriter) {
-	(*w).Header().Set("Access-Control-Allow-Origin", "*")
-	(*w).Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE")
-	(*w).Header().Set("Access-Control-Allow-Headers", "*")
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE")
+		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+
+		// Handle OPTIONS requests globally
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }
 
 func main() {
@@ -95,11 +105,11 @@ func main() {
 	}
 	apiCfg.fileserverHits.Store(0)
 
-	// First register the OPTIONS handler for API routes only
-	mux.HandleFunc("OPTIONS /api/", func(w http.ResponseWriter, r *http.Request) {
-		enableCors(&w)
-		w.WriteHeader(http.StatusOK)
-	})
+	// // First register the OPTIONS handler for API routes only
+	// mux.HandleFunc("OPTIONS /api/", func(w http.ResponseWriter, r *http.Request) {
+	// 	enableCors(&w)
+	// 	w.WriteHeader(http.StatusOK)
+	// })
 
 	// Then register the file server
 	fs := http.FileServer(http.Dir("./"))
@@ -353,7 +363,6 @@ func main() {
 	})
 
 	mux.HandleFunc("POST /api/users", func(w http.ResponseWriter, req *http.Request) {
-		enableCors(&w)
 		type parameters struct {
 			Username string `json:"username"`
 			Password string `json:"password"`
@@ -562,7 +571,6 @@ func main() {
 	})
 
 	mux.HandleFunc("POST /api/refresh", func(w http.ResponseWriter, req *http.Request) {
-		enableCors(&w)
 		refreshToken, err := auth.GetBearerToken(req.Header)
 		if err != nil {
 			respondWithError(w, 401, "unauthorized")
@@ -610,7 +618,6 @@ func main() {
 	})
 
 	mux.HandleFunc("POST /api/revoke", func(w http.ResponseWriter, req *http.Request) {
-		enableCors(&w)
 		token, err := auth.GetBearerToken(req.Header)
 		if err != nil {
 			respondWithError(w, 401, "unauthorized")
@@ -624,7 +631,6 @@ func main() {
 	})
 
 	mux.HandleFunc("/api/getuser", func(w http.ResponseWriter, req *http.Request) {
-		enableCors(&w)
 		token, err := auth.GetBearerToken(req.Header)
 		if err != nil {
 			respondWithError(w, 401, "unauthorized")
@@ -654,7 +660,7 @@ func main() {
 	})
 
 	server := http.Server{
-		Handler: mux,
+		Handler: corsMiddleware(mux),
 		Addr:    ":8080",
 	}
 	fmt.Println("Server listening on port 8080...")
