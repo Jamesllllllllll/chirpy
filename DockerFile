@@ -1,0 +1,28 @@
+# Use official Go image as builder
+FROM golang:1.21 AS build
+
+# Set working directory
+WORKDIR /app
+
+# Copy Go modules and install dependencies
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy the rest of the code and build the app
+COPY . .
+RUN go build -o main .
+
+# Create a minimal container
+FROM debian:bookworm-slim
+
+# Set working directory
+WORKDIR /root/
+
+# Copy the compiled Go binary
+COPY --from=build /app/main .
+
+# Expose port 8080
+EXPOSE 8080
+
+# Start the app
+CMD ["./main"]
