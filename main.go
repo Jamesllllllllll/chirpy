@@ -403,6 +403,7 @@ func main() {
 			UpdatedAt: user.UpdatedAt,
 			Email:     user.Email,
 			Username:  user.Username,
+			IsChirpyRed: user.IsChirpyRed,
 		}
 		respondWithJSON(w, 201, response)
 	})
@@ -458,6 +459,7 @@ func main() {
 			CreatedAt: user.CreatedAt,
 			UpdatedAt: user.UpdatedAt,
 			Email:     user.Email,
+			IsChirpyRed: user.IsChirpyRed,
 		}
 		respondWithJSON(w, 200, response)
 	})
@@ -657,6 +659,7 @@ func main() {
 			UpdatedAt: user.UpdatedAt,
 			Email:     user.Email,
 			Username:  user.Username,
+			IsChirpyRed: user.IsChirpyRed,
 		}
 		respondWithJSON(w, 200, response)
 	})
