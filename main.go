@@ -14,7 +14,7 @@ import (
 
 	"github.com/Jamesllllllllll/chirpy/internal/auth"
 	"github.com/Jamesllllllllll/chirpy/internal/database"
-	goaway "github.com/TwiN/go-away"
+	"github.com/TwiN/go-away"
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
