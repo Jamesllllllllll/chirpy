@@ -9,10 +9,10 @@ import (
 	"net/http"
 	"os"
 	"sort"
-	"strings"
 	"sync/atomic"
 	"time"
 
+	"github.com/TwiN/go-away"
 	"github.com/Jamesllllllllll/chirpy/internal/auth"
 	"github.com/Jamesllllllllll/chirpy/internal/database"
 	"github.com/google/uuid"
@@ -312,13 +312,15 @@ func main() {
 			return
 		}
 
-		words := strings.Split(strings.TrimSpace(params.Body), " ")
+		cleanText := goaway.Censor(params.Body)
 
-		for i, word := range words {
-			if strings.ToLower(word) == "kerfuffle" || strings.ToLower(word) == "sharbert" || strings.ToLower(word) == "fornax" {
-				words[i] = "****"
-			}
-		}
+		// words := strings.Split(strings.TrimSpace(params.Body), " ")
+
+		// for i, word := range words {
+		// 	if strings.ToLower(word) == "kerfuffle" || strings.ToLower(word) == "sharbert" || strings.ToLower(word) == "fornax" {
+		// 		words[i] = "****"
+		// 	}
+		// }
 
 		// userUUID, err := uuid.Parse(params.UserID)
 		// if err != nil {
@@ -327,7 +329,7 @@ func main() {
 		// }
 
 		chirpParams := database.CreateChirpParams{
-			Body:     strings.Join(words, " "),
+			Body:     cleanText,
 			UserID:   userID,
 			Username: user.Username,
 		}
@@ -343,7 +345,7 @@ func main() {
 			ID:        chirp.ID.String(),
 			CreatedAt: chirp.CreatedAt,
 			UpdatedAt: chirp.UpdatedAt,
-			Body:      strings.Join(words, " "),
+			Body:      cleanText,
 			UserID:    userID.String(),
 		}
 		respondWithJSON(w, 201, respBody)
