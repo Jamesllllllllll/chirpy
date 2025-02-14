@@ -562,6 +562,7 @@ func main() {
 	})
 
 	mux.HandleFunc("POST /api/refresh", func(w http.ResponseWriter, req *http.Request) {
+		enableCors(&w)
 		refreshToken, err := auth.GetBearerToken(req.Header)
 		if err != nil {
 			respondWithError(w, 401, "unauthorized")
@@ -609,6 +610,7 @@ func main() {
 	})
 
 	mux.HandleFunc("POST /api/revoke", func(w http.ResponseWriter, req *http.Request) {
+		enableCors(&w)
 		token, err := auth.GetBearerToken(req.Header)
 		if err != nil {
 			respondWithError(w, 401, "unauthorized")
