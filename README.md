@@ -6,4 +6,4 @@ This project is started from the [Learn HTTP Servers in Go](https://www.boot.dev
 
 The back-end app is hosted on fly.io, and I built a frontend ([repo link](https://github.com/Jamesllllllllll/chirpy-front-end)) with React, hosted on Vercel along with the Postgres database.
 
-As of Feb, 2025, it's publically available here: https://chirpy-boot.vercel.app
+As of Feb, 2025 it's publically available here: https://chirpy-boot.vercel.app
