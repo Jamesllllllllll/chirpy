@@ -80,8 +80,19 @@ func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) error
 	return nil
 }
 
-func respondWithError(w http.ResponseWriter, code int, msg string) error {
-	return respondWithJSON(w, code, map[string]string{"error": msg})
+func respondWithError(w http.ResponseWriter, code int, msg string, err error) {
+	if err != nil {
+		log.Println(err)
+	}
+	if code > 499 {
+		log.Printf("Responding with 5XX error: %s", msg)
+	}
+	type errorResponse struct {
+		Error string `json:"error"`
+	}
+	respondWithJSON(w, code, errorResponse{
+		Error: msg,
+	})
 }
 
 func corsMiddleware(next http.Handler) http.Handler {
@@ -162,18 +173,18 @@ func main() {
 
 		chirpID, err := uuid.Parse(chirpIDString.Get("chirpID"))
 		if err != nil {
-			respondWithError(w, http.StatusBadRequest, "Invalid ID")
+			respondWithError(w, http.StatusBadRequest, "Invalid ID", err)
 			return
 		}
 		token, err := auth.GetBearerToken(req.Header)
 		if err != nil {
-			respondWithError(w, http.StatusUnauthorized, "Couldn't find JWT")
+			respondWithError(w, http.StatusUnauthorized, "Couldn't find JWT", err)
 			return
 		}
 
 		userID, err := auth.ValidateJWT(token, apiCfg.secret)
 		if err != nil {
-			respondWithError(w, http.StatusUnauthorized, "Couldn't validate JWT")
+			respondWithError(w, http.StatusUnauthorized, "Couldn't validate JWT", err)
 			return
 		}
 
@@ -181,24 +192,24 @@ func main() {
 		const maxMemory = 2 << 20
 		memErr := req.ParseMultipartForm(maxMemory)
 		if memErr != nil {
-			respondWithError(w, http.StatusBadRequest, "Unable to parse form")
+			respondWithError(w, http.StatusBadRequest, "Unable to parse form", err)
 			return
 		}
 
 		chirpData, err := apiCfg.databaseQueries.GetSingleChirp(req.Context(), chirpID)
 		if err != nil {
-			respondWithError(w, 500, "Error getting video")
+			respondWithError(w, 500, "Error getting video", err)
 			return
 		}
 
 		if chirpData.UserID != userID {
-			respondWithError(w, http.StatusUnauthorized, "Unauthorized")
+			respondWithError(w, http.StatusUnauthorized, "Unauthorized", err)
 			return
 		}
 
 		file, header, err := req.FormFile("image")
 		if err != nil {
-			respondWithError(w, http.StatusBadRequest, "Unable to parse form file")
+			respondWithError(w, http.StatusBadRequest, "Unable to parse form file", err)
 			return
 		}
 		defer file.Close()
@@ -207,11 +218,11 @@ func main() {
 
 		fileExtension, _, err := mime.ParseMediaType(header.Header.Get("Content-Type"))
 		if err != nil {
-			respondWithError(w, 500, "Error getting file extension")
+			respondWithError(w, 500, "Error getting file extension", err)
 			return
 		}
 		if fileExtension != "image/png" && fileExtension != "image/jpeg" {
-			respondWithError(w, 400, "Invalid file type")
+			respondWithError(w, 400, "Invalid file type", err)
 			return
 		}
 
@@ -242,7 +253,7 @@ func main() {
 
 		_, err = apiCfg.s3Client.PutObject(ctx, &params)
 		if err != nil {
-			respondWithError(w, 500, "Error creating PutObject")
+			respondWithError(w, 500, "Error creating PutObject", err)
 			return
 		}
 
@@ -256,7 +267,7 @@ func main() {
 		// update in DB
 		updateResult, err := apiCfg.databaseQueries.AddImage(req.Context(), addImage)
 		if err != nil {
-			respondWithError(w, 500, "Error updating video")
+			respondWithError(w, 500, "Error updating video", err)
 			return
 		}
 
@@ -293,12 +304,12 @@ func main() {
 
 	mux.HandleFunc("POST /admin/reset", func(w http.ResponseWriter, req *http.Request) {
 		if apiCfg.platform != "dev" {
-			respondWithError(w, 403, "Forbidden")
+			respondWithError(w, 403, "Forbidden", err)
 		}
 
 		err := apiCfg.databaseQueries.DeleteUsers(req.Context())
 		if err != nil {
-			respondWithError(w, 500, "Error deleting users")
+			respondWithError(w, 500, "Error deleting users", err)
 			return
 		}
 		w.WriteHeader(200)
@@ -311,12 +322,12 @@ func main() {
 		if authorID != "" {
 			userID, err := uuid.Parse(authorID)
 			if err != nil {
-				respondWithError(w, 404, "Error parsing user ID")
+				respondWithError(w, 404, "Error parsing user ID", err)
 				return
 			}
 			authorChirps, err := apiCfg.databaseQueries.GetChirpsByAuthor(req.Context(), userID)
 			if err != nil {
-				respondWithError(w, 204, "no chirps found for user")
+				respondWithError(w, 204, "no chirps found for user", err)
 				return
 			}
 			formattedChirps := make([]singleChirp, len(authorChirps))
@@ -340,7 +351,7 @@ func main() {
 		allChirps, err := apiCfg.databaseQueries.GetAllChirps(req.Context())
 		if err != nil {
 			fmt.Print("error getting chirps:", err)
-			respondWithError(w, 500, "Error getting chirps")
+			respondWithError(w, 500, "Error getting chirps", err)
 			return
 		}
 		formattedChirps := make([]singleChirp, len(allChirps))
@@ -363,13 +374,13 @@ func main() {
 	mux.HandleFunc("GET /api/chirps/{chirpID}", func(w http.ResponseWriter, req *http.Request) {
 		id, err := uuid.Parse(req.PathValue("chirpID"))
 		if err != nil {
-			respondWithError(w, 500, "Error with chirp ID")
+			respondWithError(w, 500, "Error with chirp ID", err)
 			return
 		}
 		chirp, err := apiCfg.databaseQueries.GetSingleChirp(req.Context(), id)
 		if err != nil {
 			fmt.Println("Error retrieving chirp:", err)
-			respondWithError(w, 404, "Not Found")
+			respondWithError(w, 404, "Not Found", err)
 			return
 		}
 		respBody := singleChirp{
@@ -385,36 +396,36 @@ func main() {
 	mux.HandleFunc("DELETE /api/chirps/{chirpID}", func(w http.ResponseWriter, req *http.Request) {
 		token, err := auth.GetBearerToken(req.Header)
 		if err != nil {
-			respondWithError(w, 401, "Unauthorized")
+			respondWithError(w, 401, "Unauthorized", err)
 			return
 		}
 
 		userID, validateErr := auth.ValidateJWT(token, apiCfg.secret)
 		if validateErr != nil {
-			respondWithError(w, 401, "Unauthorized")
+			respondWithError(w, 401, "Unauthorized", err)
 			return
 		}
 
 		id, err := uuid.Parse(req.PathValue("chirpID"))
 		if err != nil {
-			respondWithError(w, 500, "Error with chirp ID")
+			respondWithError(w, 500, "Error with chirp ID", err)
 			return
 		}
 
 		chirp, err := apiCfg.databaseQueries.GetSingleChirp(req.Context(), id)
 		if err != nil {
-			respondWithError(w, 404, "Not found")
+			respondWithError(w, 404, "Not found", err)
 			return
 		}
 		if chirp.UserID != userID {
-			respondWithError(w, 403, "Unauthorized")
+			respondWithError(w, 403, "Unauthorized", err)
 			return
 		}
 
 		deleteErr := apiCfg.databaseQueries.DeleteSingleChirp(req.Context(), id)
 		if deleteErr != nil {
 			fmt.Println("Error deleting chirp:", err)
-			respondWithError(w, 404, "Not Found")
+			respondWithError(w, 404, "Not Found", err)
 			return
 		}
 
@@ -424,19 +435,19 @@ func main() {
 	mux.HandleFunc("POST /api/chirps", func(w http.ResponseWriter, req *http.Request) {
 		token, err := auth.GetBearerToken(req.Header)
 		if err != nil {
-			respondWithError(w, 401, "Unauthorized")
+			respondWithError(w, 401, "Unauthorized", err)
 			return
 		}
 
 		userID, err := auth.ValidateJWT(token, apiCfg.secret)
 		if err != nil {
-			respondWithError(w, 401, "Unauthorized")
+			respondWithError(w, 401, "Unauthorized", err)
 			return
 		}
 
 		user, err := apiCfg.databaseQueries.FindUserById(req.Context(), userID)
 		if err != nil {
-			respondWithError(w, 404, "Not found")
+			respondWithError(w, 404, "Not found", err)
 			return
 		}
 
@@ -462,7 +473,7 @@ func main() {
 		// params is a struct with data populated successfully
 
 		if len(params.Body) > 140 {
-			respondWithError(w, 400, "Chirp is too long")
+			respondWithError(w, 400, "Chirp is too long", err)
 			return
 		}
 
@@ -483,7 +494,7 @@ func main() {
 		chirp, err := apiCfg.databaseQueries.CreateChirp(req.Context(), chirpParams)
 		if err != nil {
 			fmt.Print("error creating chirp:", err)
-			respondWithError(w, 500, "Error creating chirp")
+			respondWithError(w, 500, "Error creating chirp", err)
 			return
 		}
 
@@ -517,7 +528,7 @@ func main() {
 		hashed_password, err := auth.HashPassword(params.Password)
 		if err != nil {
 			log.Printf("Error hashing password: %s", err)
-			respondWithError(w, 500, "Error hashing password")
+			respondWithError(w, 500, "Error hashing password", err)
 			return
 		}
 
@@ -529,7 +540,7 @@ func main() {
 		user, err := apiCfg.databaseQueries.CreateUser(req.Context(), createUserParams)
 		if err != nil {
 			fmt.Print("error creating user:", err)
-			respondWithError(w, 500, "Error creating user")
+			respondWithError(w, 500, "Error creating user", err)
 			return
 		}
 
@@ -547,13 +558,13 @@ func main() {
 	mux.HandleFunc("PUT /api/users", func(w http.ResponseWriter, req *http.Request) {
 		token, err := auth.GetBearerToken(req.Header)
 		if err != nil {
-			respondWithError(w, 401, "Unauthorized")
+			respondWithError(w, 401, "Unauthorized", err)
 			return
 		}
 
 		userID, err := auth.ValidateJWT(token, apiCfg.secret)
 		if err != nil {
-			respondWithError(w, 401, "Unauthorized")
+			respondWithError(w, 401, "Unauthorized", err)
 			return
 		}
 
@@ -574,7 +585,7 @@ func main() {
 		hashed_password, err := auth.HashPassword(params.Password)
 		if err != nil {
 			log.Printf("Error hashing password: %s", err)
-			respondWithError(w, 500, "Error hashing password")
+			respondWithError(w, 500, "Error hashing password", err)
 			return
 		}
 
@@ -586,7 +597,7 @@ func main() {
 		user, err := apiCfg.databaseQueries.UpdateUser(req.Context(), updateUserParams)
 		if err != nil {
 			fmt.Print("error updating user:", err)
-			respondWithError(w, 500, "Error updating user")
+			respondWithError(w, 500, "Error updating user", err)
 			return
 		}
 
@@ -610,12 +621,12 @@ func main() {
 
 		apiKey, err := auth.GetAPIKey(req.Header)
 		if err != nil {
-			respondWithError(w, 401, "unauthorized")
+			respondWithError(w, 401, "unauthorized", err)
 			return
 		}
 
 		if apiKey != apiCfg.polkaKey {
-			respondWithError(w, 401, "unauthorized")
+			respondWithError(w, 401, "unauthorized", err)
 			return
 		}
 
@@ -629,19 +640,19 @@ func main() {
 		}
 
 		if params.Event != "user.upgraded" {
-			respondWithError(w, 204, "no content")
+			respondWithError(w, 204, "no content", err)
 			return
 		}
 
 		userID, err := uuid.Parse(params.Data.UserID)
 		if err != nil {
-			respondWithError(w, 500, "error parsing user ID")
+			respondWithError(w, 500, "error parsing user ID", err)
 			return
 		}
 
 		user, err := apiCfg.databaseQueries.UpgradeUser(req.Context(), userID)
 		if err != nil {
-			respondWithError(w, 404, "not found")
+			respondWithError(w, 404, "not found", err)
 			return
 		}
 
@@ -659,32 +670,32 @@ func main() {
 		err := decoder.Decode(&params)
 		if err != nil {
 			log.Printf("Error decoding parameters: %s", err)
-			respondWithError(w, 500, "Error decoding parameters")
+			respondWithError(w, 500, "Error decoding parameters", err)
 			return
 		}
 
 		user, err := apiCfg.databaseQueries.FindUserByEmail(req.Context(), params.Email)
 		if err != nil {
 			log.Printf("Incorrect email or password: %s", err)
-			respondWithError(w, 401, "Incorrect email or password")
+			respondWithError(w, 401, "Incorrect email or password", err)
 			return
 		}
 
 		match := auth.CheckPasswordHash(params.Password, user.HashedPassword)
 		if match != nil {
 			log.Println("Error matching password:", match)
-			respondWithError(w, 401, "Incorrect email or password")
+			respondWithError(w, 401, "Incorrect email or password", err)
 			return
 		}
 
 		token, err := auth.MakeJWT(user.ID, apiCfg.secret, time.Second*time.Duration(3600))
 		if err != nil {
-			respondWithError(w, 500, "error creating JWT")
+			respondWithError(w, 500, "error creating JWT", err)
 		}
 
 		refreshToken, err := auth.MakeRefreshToken()
 		if err != nil {
-			respondWithError(w, 500, "error creating refresh token")
+			respondWithError(w, 500, "error creating refresh token", err)
 		}
 
 		response := User{
@@ -711,7 +722,7 @@ func main() {
 	mux.HandleFunc("POST /api/refresh", func(w http.ResponseWriter, req *http.Request) {
 		refreshToken, err := auth.GetBearerToken(req.Header)
 		if err != nil {
-			respondWithError(w, 401, "unauthorized")
+			respondWithError(w, 401, "unauthorized", err)
 			return
 		}
 		fmt.Println("Token in /api/refresh:", refreshToken)
@@ -719,7 +730,7 @@ func main() {
 		dbToken, err := apiCfg.databaseQueries.LookupRefreshToken(req.Context(), refreshToken)
 		if err != nil {
 			fmt.Println("Error looking up refresh token:", err)
-			respondWithError(w, 401, "unauthorized")
+			respondWithError(w, 401, "unauthorized", err)
 			return
 		}
 
@@ -727,13 +738,13 @@ func main() {
 
 		if dbToken.ExpiresAt.Before(time.Now()) || dbToken.RevokedAt.Valid {
 			fmt.Println("Token expired or revoked")
-			respondWithError(w, 401, "unauthorized")
+			respondWithError(w, 401, "unauthorized", err)
 			return
 		}
 
 		newAccessToken, err := auth.MakeJWT(dbToken.UserID, apiCfg.secret, time.Second*time.Duration(3600))
 		if err != nil {
-			respondWithError(w, 500, "error creating JWT")
+			respondWithError(w, 500, "error creating JWT", err)
 			return
 		}
 
@@ -754,12 +765,12 @@ func main() {
 	mux.HandleFunc("POST /api/revoke", func(w http.ResponseWriter, req *http.Request) {
 		token, err := auth.GetBearerToken(req.Header)
 		if err != nil {
-			respondWithError(w, 401, "unauthorized")
+			respondWithError(w, 401, "unauthorized", err)
 		}
 
 		response, err := apiCfg.databaseQueries.RevokeToken(req.Context(), token)
 		if err != nil {
-			respondWithError(w, 404, "not found")
+			respondWithError(w, 404, "not found", err)
 		}
 		respondWithJSON(w, 204, response)
 	})
@@ -767,19 +778,19 @@ func main() {
 	mux.HandleFunc("/api/getuser", func(w http.ResponseWriter, req *http.Request) {
 		token, err := auth.GetBearerToken(req.Header)
 		if err != nil {
-			respondWithError(w, 401, "unauthorized")
+			respondWithError(w, 401, "unauthorized", err)
 			return
 		}
 
 		userID, err := auth.ValidateJWT(token, apiCfg.secret)
 		if err != nil {
-			respondWithError(w, 401, "unauthorized")
+			respondWithError(w, 401, "unauthorized", err)
 			return
 		}
 
 		user, err := apiCfg.databaseQueries.FindUserById(req.Context(), userID)
 		if err != nil {
-			respondWithError(w, 404, "user not found")
+			respondWithError(w, 404, "user not found", err)
 			return
 		}
 
