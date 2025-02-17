@@ -103,7 +103,6 @@ func corsMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE")
 		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
 
-		// Handle OPTIONS requests globally
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -184,7 +183,6 @@ func main() {
 	}
 	apiCfg.fileserverHits.Store(0)
 
-	// Then register the file server
 	fs := http.FileServer(http.Dir("./"))
 	handler := http.StripPrefix("/app/", fs)
 	mux.Handle("/app/", apiCfg.middwareMetricsInc(handler))
@@ -259,8 +257,8 @@ func main() {
 		}
 
 		// This is where we can do io.Copy to make a temp file and process it
-		// Starting at line ~90 in handler_upload_video.go in the s3 project
 		// Maybe resize to be within a certain limit
+		// Reference s3 project starting at line 90 in handler_upload_video.go
 
 		// Make empty slice of bytes for the file name
 		fileName := make([]byte, 32)
@@ -335,6 +333,7 @@ func main() {
 	})
 
 	mux.HandleFunc("POST /admin/reset", func(w http.ResponseWriter, req *http.Request) {
+		// only allow in dev environment
 		if apiCfg.platform != "dev" {
 			respondWithError(w, 403, "Forbidden", err)
 		}
@@ -511,12 +510,6 @@ func main() {
 		}
 
 		cleanText := goaway.Censor(params.Body)
-
-		// userUUID, err := uuid.Parse(params.UserID)
-		// if err != nil {
-		// 	respondWithError(w, 400, "Problem with user ID")
-		// 	return
-		// }
 
 		chirpParams := database.CreateChirpParams{
 			Body:     cleanText,
