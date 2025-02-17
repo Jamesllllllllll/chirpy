@@ -172,8 +172,7 @@ func main() {
 		// Add CORS headers specifically for this endpoint
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
-
+		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, multipart/form-data")
 		// Handle preflight OPTIONS request
 		if req.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusNoContent)
