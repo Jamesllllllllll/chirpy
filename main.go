@@ -169,13 +169,6 @@ func main() {
 	mux.Handle("/app/", apiCfg.middwareMetricsInc(handler))
 
 	mux.HandleFunc("POST /api/upload", func(w http.ResponseWriter, req *http.Request) {
-		chirpIDString := req.URL.Query()
-
-		chirpID, err := uuid.Parse(chirpIDString.Get("chirpID"))
-		if err != nil {
-			respondWithError(w, http.StatusBadRequest, "Invalid ID", err)
-			return
-		}
 		token, err := auth.GetBearerToken(req.Header)
 		if err != nil {
 			respondWithError(w, http.StatusUnauthorized, "Couldn't find JWT", err)
@@ -185,6 +178,14 @@ func main() {
 		userID, err := auth.ValidateJWT(token, apiCfg.secret)
 		if err != nil {
 			respondWithError(w, http.StatusUnauthorized, "Couldn't validate JWT", err)
+			return
+		}
+		
+		chirpIDString := req.URL.Query()
+
+		chirpID, err := uuid.Parse(chirpIDString.Get("chirpID"))
+		if err != nil {
+			respondWithError(w, http.StatusBadRequest, "Invalid ID", err)
 			return
 		}
 
