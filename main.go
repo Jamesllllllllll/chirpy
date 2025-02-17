@@ -454,6 +454,22 @@ func main() {
 			return
 		}
 
+		// delete image from s3 if one exists
+		if len(chirp.Imageurl) > 0 {
+			fileKey := strings.Split(chirp.Imageurl, "cloudfront.net/")[1]
+
+			params := s3.DeleteObjectInput{
+				Bucket: &apiCfg.s3Bucket,
+				Key:    &fileKey,
+			}
+
+			_, err = apiCfg.s3Client.DeleteObject(ctx, &params)
+			if err != nil {
+				respondWithError(w, 500, "Error deleting image associated with the Chirp", err)
+				// continue deleting chirp even if image cannot be deleted (no return here)
+			}
+		}
+
 		deleteErr := apiCfg.databaseQueries.DeleteSingleChirp(req.Context(), id)
 		if deleteErr != nil {
 			fmt.Println("Error deleting chirp:", err)
