@@ -22,6 +22,7 @@ import (
 	"github.com/Jamesllllllllll/chirpy/internal/database"
 	goaway "github.com/TwiN/go-away"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
@@ -140,11 +141,26 @@ func main() {
 	}
 	ctx := context.TODO()
 
+	awsAccessKeyID := os.Getenv("AWS_ACCESS_KEY_ID")
+	if awsAccessKeyID == "" {
+		log.Fatal("AWS_ACCESS_KEY_ID environment variable is not set")
+	}
+
+	awsSecretAccessKey := os.Getenv("AWS_SECRET_ACCESS_KEY")
+	if awsSecretAccessKey == "" {
+		log.Fatal("AWS_SECRET_ACCESS_KEY environment variable is not set")
+	}
+
 	awsConfig, err := config.LoadDefaultConfig(ctx,
 		config.WithRegion(s3Region),
+		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(
+			awsAccessKeyID,
+			awsSecretAccessKey,
+			"",
+		)),
 	)
 	if err != nil {
-		log.Fatal("Error loading awsConfig")
+		log.Fatal("Error loading awsConfig:", err)
 	}
 
 	myS3Client := s3.NewFromConfig(awsConfig)
