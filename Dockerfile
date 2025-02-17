@@ -1,30 +1,20 @@
-# Builder stage
-FROM golang:1.21-bookworm as builder
+ARG GO_VERSION=1
+FROM golang:${GO_VERSION}-bookworm as builder
 
 WORKDIR /usr/src/app
-
-# Copy Go modules and install dependencies
 COPY go.mod go.sum ./
 RUN go mod download && go mod verify
-
-# Copy the rest of the code and build
 COPY . .
 RUN go build -v -o /run-app .
 
-# Final stage
-FROM debian:bookworm-slim
 
-# Install CA certificates (to fix the TLS issue)
+FROM debian:bookworm
+
+# Add this to fix the TLS certificate issue
 RUN apt-get update && \
     apt-get install -y ca-certificates && \
     update-ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
-# Copy the binary from builder
 COPY --from=builder /run-app /usr/local/bin/
-
-# Expose port 8080
-EXPOSE 8080
-
-# Run the application
 CMD ["run-app"]
