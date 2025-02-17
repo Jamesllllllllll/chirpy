@@ -169,6 +169,17 @@ func main() {
 	mux.Handle("/app/", apiCfg.middwareMetricsInc(handler))
 
 	mux.HandleFunc("POST /api/upload", func(w http.ResponseWriter, req *http.Request) {
+		// Add CORS headers specifically for this endpoint
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+
+		// Handle preflight OPTIONS request
+		if req.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
 		token, err := auth.GetBearerToken(req.Header)
 		if err != nil {
 			respondWithError(w, http.StatusUnauthorized, "Couldn't find JWT", err)
@@ -180,7 +191,7 @@ func main() {
 			respondWithError(w, http.StatusUnauthorized, "Couldn't validate JWT", err)
 			return
 		}
-		
+
 		chirpIDString := req.URL.Query()
 
 		chirpID, err := uuid.Parse(chirpIDString.Get("chirpID"))
