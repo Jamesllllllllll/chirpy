@@ -1,31 +1,44 @@
 package main
 
 import (
+	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"html/template"
 	"log"
+	"mime"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sort"
+	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/Jamesllllllllll/chirpy/internal/auth"
 	"github.com/Jamesllllllllll/chirpy/internal/database"
-	"github.com/TwiN/go-away"
+	goaway "github.com/TwiN/go-away"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 )
 
 type apiConfig struct {
-	fileserverHits  atomic.Int32
-	databaseQueries *database.Queries
-	platform        string
-	secret          string
-	polkaKey        string
+	fileserverHits   atomic.Int32
+	databaseQueries  *database.Queries
+	platform         string
+	secret           string
+	polkaKey         string
+	assetsRoot       string
+	s3Bucket         string
+	s3Region         string
+	s3CfDistribution string
+	s3Client         *s3.Client
 }
 
 type User struct {
@@ -46,6 +59,7 @@ type singleChirp struct {
 	Body      string    `json:"body"`
 	UserID    string    `json:"user_id"`
 	Username  string    `json:"username"`
+	ImageURL  string    `json:"imageURL"`
 }
 
 func (cfg *apiConfig) middwareMetricsInc(next http.Handler) http.Handler {
@@ -95,13 +109,53 @@ func main() {
 		log.Fatal("error connecting to database")
 	}
 
+	assetsRoot := os.Getenv("ASSETS_ROOT")
+	if assetsRoot == "" {
+		log.Fatal("ASSETS_ROOT environment variable is not set")
+	}
+
+	s3Bucket := os.Getenv("S3_BUCKET")
+	if s3Bucket == "" {
+		log.Fatal("S3_BUCKET environment variable is not set")
+	}
+
+	s3Region := os.Getenv("S3_REGION")
+	if s3Region == "" {
+		log.Fatal("S3_REGION environment variable is not set")
+	}
+
+	s3CfDistribution := os.Getenv("S3_CF_DISTRO")
+	if s3CfDistribution == "" {
+		log.Fatal("S3_CF_DISTRO environment variable is not set")
+	}
+
+	port := os.Getenv("PORT")
+	if port == "" {
+		log.Fatal("PORT environment variable is not set")
+	}
+	ctx := context.TODO()
+
+	awsConfig, err := config.LoadDefaultConfig(ctx,
+		config.WithRegion(s3Region),
+	)
+	if err != nil {
+		log.Fatal("Error loading awsConfig")
+	}
+
+	myS3Client := s3.NewFromConfig(awsConfig)
+
 	mux := http.NewServeMux()
 
 	apiCfg := apiConfig{
-		databaseQueries: database.New(db),
-		platform:        os.Getenv("PLATFORM"),
-		secret:          os.Getenv("SECRET"),
-		polkaKey:        os.Getenv("POLKA_KEY"),
+		databaseQueries:  database.New(db),
+		platform:         os.Getenv("PLATFORM"),
+		secret:           os.Getenv("SECRET"),
+		polkaKey:         os.Getenv("POLKA_KEY"),
+		assetsRoot:       assetsRoot,
+		s3Bucket:         s3Bucket,
+		s3Region:         s3Region,
+		s3CfDistribution: s3CfDistribution,
+		s3Client:         myS3Client,
 	}
 	apiCfg.fileserverHits.Store(0)
 
@@ -115,6 +169,112 @@ func main() {
 	fs := http.FileServer(http.Dir("./"))
 	handler := http.StripPrefix("/app/", fs)
 	mux.Handle("/app/", apiCfg.middwareMetricsInc(handler))
+
+	mux.HandleFunc("POST /api/upload", func(w http.ResponseWriter, req *http.Request) {
+		chirpIDString := req.URL.Query()
+
+		chirpID, err := uuid.Parse(chirpIDString.Get("chirpID"))
+		if err != nil {
+			respondWithError(w, http.StatusBadRequest, "Invalid ID")
+			return
+		}
+		token, err := auth.GetBearerToken(req.Header)
+		if err != nil {
+			respondWithError(w, http.StatusUnauthorized, "Couldn't find JWT")
+			return
+		}
+
+		userID, err := auth.ValidateJWT(token, apiCfg.secret)
+		if err != nil {
+			respondWithError(w, http.StatusUnauthorized, "Couldn't validate JWT")
+			return
+		}
+
+		// Max memory: 2MB
+		const maxMemory = 2 << 20
+		memErr := req.ParseMultipartForm(maxMemory)
+		if memErr != nil {
+			respondWithError(w, http.StatusBadRequest, "Unable to parse form")
+			return
+		}
+
+		chirpData, err := apiCfg.databaseQueries.GetSingleChirp(req.Context(), chirpID)
+		if err != nil {
+			respondWithError(w, 500, "Error getting video")
+			return
+		}
+
+		if chirpData.UserID != userID {
+			respondWithError(w, http.StatusUnauthorized, "Unauthorized")
+			return
+		}
+
+		file, header, err := req.FormFile("image")
+		if err != nil {
+			respondWithError(w, http.StatusBadRequest, "Unable to parse form file")
+			return
+		}
+		defer file.Close()
+
+		fmt.Println("uploading image by user", userID)
+
+		fileExtension, _, err := mime.ParseMediaType(header.Header.Get("Content-Type"))
+		if err != nil {
+			respondWithError(w, 500, "Error getting file extension")
+			return
+		}
+		if fileExtension != "image/png" && fileExtension != "image/jpeg" {
+			respondWithError(w, 400, "Invalid file type")
+			return
+		}
+
+		// This is where we can do io.Copy to make a temp file and process it
+		// Starting at line ~90 in handler_upload_video.go in the s3 project
+		// Maybe resize to be within a certain limit
+
+		// Make empty slice of bytes for the file name
+		fileName := make([]byte, 32)
+
+		// fill with random bytes
+		rand.Read(fileName)
+
+		// encode the bytes to a URL encoded string
+		encodedFilename := base64.RawURLEncoding.EncodeToString(fileName)
+
+		// form the file path
+		fullFilename := filepath.Join(userID.String(), encodedFilename) + "." + strings.Split(fileExtension, "/")[1]
+
+		ctx := context.TODO()
+
+		params := s3.PutObjectInput{
+			Bucket:      &apiCfg.s3Bucket,
+			Key:         &fullFilename,
+			Body:        file,
+			ContentType: &fileExtension,
+		}
+
+		_, err = apiCfg.s3Client.PutObject(ctx, &params)
+		if err != nil {
+			respondWithError(w, 500, "Error creating PutObject")
+			return
+		}
+
+		imageURL := fmt.Sprintf("%s/%s", apiCfg.s3CfDistribution, fullFilename)
+
+		addImage := database.AddImageParams{
+			Imageurl: imageURL,
+			ID:       chirpData.ID,
+		}
+
+		// update in DB
+		updateResult, err := apiCfg.databaseQueries.AddImage(req.Context(), addImage)
+		if err != nil {
+			respondWithError(w, 500, "Error updating video")
+			return
+		}
+
+		respondWithJSON(w, http.StatusOK, updateResult)
+	})
 
 	mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, req *http.Request) {
 		req.Header.Add("Content-Type", "text/plain; charset=utf8")
@@ -156,10 +316,6 @@ func main() {
 		}
 		w.WriteHeader(200)
 		w.Write([]byte("Deleted all users"))
-		// apiCfg.fileserverHits.Store(0)
-		// req.Header.Add("Content-Type", "text/plain; charset=utf8")
-		// w.WriteHeader(200)
-		// w.Write([]byte("OK - Reset metrics"))
 	})
 
 	mux.HandleFunc("GET /api/chirps", func(w http.ResponseWriter, req *http.Request) {
@@ -185,6 +341,7 @@ func main() {
 					Body:      chirp.Body,
 					UserID:    chirp.UserID.String(),
 					Username:  chirp.Username,
+					ImageURL:  chirp.Imageurl,
 				}
 			}
 			if sortQ == "desc" {
@@ -267,7 +424,7 @@ func main() {
 			return
 		}
 
-		deleteErr := apiCfg.databaseQueries.DeleteSingleChrip(req.Context(), id)
+		deleteErr := apiCfg.databaseQueries.DeleteSingleChirp(req.Context(), id)
 		if deleteErr != nil {
 			fmt.Println("Error deleting chirp:", err)
 			respondWithError(w, 404, "Not Found")
@@ -398,11 +555,11 @@ func main() {
 		}
 
 		response := User{
-			ID:        user.ID,
-			CreatedAt: user.CreatedAt,
-			UpdatedAt: user.UpdatedAt,
-			Email:     user.Email,
-			Username:  user.Username,
+			ID:          user.ID,
+			CreatedAt:   user.CreatedAt,
+			UpdatedAt:   user.UpdatedAt,
+			Email:       user.Email,
+			Username:    user.Username,
 			IsChirpyRed: user.IsChirpyRed,
 		}
 		respondWithJSON(w, 201, response)
@@ -455,10 +612,10 @@ func main() {
 		}
 
 		response := User{
-			ID:        user.ID,
-			CreatedAt: user.CreatedAt,
-			UpdatedAt: user.UpdatedAt,
-			Email:     user.Email,
+			ID:          user.ID,
+			CreatedAt:   user.CreatedAt,
+			UpdatedAt:   user.UpdatedAt,
+			Email:       user.Email,
 			IsChirpyRed: user.IsChirpyRed,
 		}
 		respondWithJSON(w, 200, response)
@@ -604,12 +761,6 @@ func main() {
 		fmt.Println("Refresh token:", refreshToken)
 		fmt.Println("New access token:", newAccessToken)
 
-		// response := struct {
-		// 	Token string
-		// }{
-		// 	Token: newAccessToken,
-		// }
-
 		type simpleTokenResponse struct {
 			Token string `json:"token"`
 		}
@@ -654,11 +805,11 @@ func main() {
 		}
 
 		response := User{
-			ID:        user.ID,
-			CreatedAt: user.CreatedAt,
-			UpdatedAt: user.UpdatedAt,
-			Email:     user.Email,
-			Username:  user.Username,
+			ID:          user.ID,
+			CreatedAt:   user.CreatedAt,
+			UpdatedAt:   user.UpdatedAt,
+			Email:       user.Email,
+			Username:    user.Username,
 			IsChirpyRed: user.IsChirpyRed,
 		}
 		respondWithJSON(w, 200, response)
@@ -670,5 +821,4 @@ func main() {
 	}
 	fmt.Println("Server listening on port 8080...")
 	server.ListenAndServe()
-
 }

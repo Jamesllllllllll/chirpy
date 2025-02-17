@@ -18,6 +18,7 @@ type Chirp struct {
 	Body      string
 	UserID    uuid.UUID
 	Username  string
+	Imageurl  string
 }
 
 type RefreshToken struct {
