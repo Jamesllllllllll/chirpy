@@ -363,6 +363,7 @@ func main() {
 				Body:      chirp.Body,
 				UserID:    chirp.UserID.String(),
 				Username:  chirp.Username,
+				ImageURL:  chirp.Imageurl,
 			}
 		}
 		if sortQ == "desc" {
