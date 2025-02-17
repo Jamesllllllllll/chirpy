@@ -707,6 +707,7 @@ func main() {
 			Token:        token,
 			RefreshToken: refreshToken,
 			IsChirpyRed:  user.IsChirpyRed,
+			Username:     user.Username,
 		}
 
 		saveRefreshTokenParams := database.SaveRefreshTokenParams{
