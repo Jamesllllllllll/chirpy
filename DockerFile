@@ -1,28 +1,30 @@
-# Use official Go image as builder
-FROM golang:1.21 AS build
+# Builder stage
+FROM golang:1.21-bookworm as builder
 
-# Set working directory
-WORKDIR /app
+WORKDIR /usr/src/app
 
 # Copy Go modules and install dependencies
 COPY go.mod go.sum ./
-RUN go mod download
+RUN go mod download && go mod verify
 
-# Copy the rest of the code and build the app
+# Copy the rest of the code and build
 COPY . .
-RUN go build -o main .
+RUN go build -v -o /run-app .
 
-# Create a minimal container
+# Final stage
 FROM debian:bookworm-slim
 
-# Set working directory
-WORKDIR /root/
+# Install CA certificates (to fix the TLS issue)
+RUN apt-get update && \
+    apt-get install -y ca-certificates && \
+    update-ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
 
-# Copy the compiled Go binary
-COPY --from=build /app/main .
+# Copy the binary from builder
+COPY --from=builder /run-app /usr/local/bin/
 
 # Expose port 8080
 EXPOSE 8080
 
-# Start the app
-CMD ["./main"]
+# Run the application
+CMD ["run-app"]

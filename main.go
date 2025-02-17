@@ -230,7 +230,7 @@ func main() {
 
 		chirpData, err := apiCfg.databaseQueries.GetSingleChirp(req.Context(), chirpID)
 		if err != nil {
-			respondWithError(w, 500, "Error getting video", err)
+			respondWithError(w, 500, "Error getting chirp", err)
 			return
 		}
 
