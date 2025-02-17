@@ -21,6 +21,7 @@ import (
 	"github.com/Jamesllllllllll/chirpy/internal/auth"
 	"github.com/Jamesllllllllll/chirpy/internal/database"
 	goaway "github.com/TwiN/go-away"
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -163,7 +164,11 @@ func main() {
 		log.Fatal("Error loading awsConfig:", err)
 	}
 
-	myS3Client := s3.NewFromConfig(awsConfig)
+	// Create S3 client with path-style addressing
+	myS3Client := s3.NewFromConfig(awsConfig, func(o *s3.Options) {
+		o.UsePathStyle = true // Use path-style addressing
+		o.BaseEndpoint = aws.String(fmt.Sprintf("https://s3.%s.amazonaws.com", s3Region))
+	})
 
 	mux := http.NewServeMux()
 
