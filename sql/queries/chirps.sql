@@ -1,7 +1,7 @@
 -- name: CreateChirp :one
-INSERT INTO chirps (id, created_at, updated_at, body, user_id, username)
+INSERT INTO chirps (id, created_at, updated_at, body, user_id, username, imageURL)
 VALUES (
-    gen_random_uuid(), NOW(), NOW(), $1, $2, $3
+    gen_random_uuid(), NOW(), NOW(), $1, $2, $3, ''
 )
 RETURNING *;
 
