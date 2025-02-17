@@ -34,7 +34,6 @@ type apiConfig struct {
 	platform         string
 	secret           string
 	polkaKey         string
-	assetsRoot       string
 	s3Bucket         string
 	s3Region         string
 	s3CfDistribution string
@@ -109,11 +108,6 @@ func main() {
 		log.Fatal("error connecting to database")
 	}
 
-	assetsRoot := os.Getenv("ASSETS_ROOT")
-	if assetsRoot == "" {
-		log.Fatal("ASSETS_ROOT environment variable is not set")
-	}
-
 	s3Bucket := os.Getenv("S3_BUCKET")
 	if s3Bucket == "" {
 		log.Fatal("S3_BUCKET environment variable is not set")
@@ -151,19 +145,12 @@ func main() {
 		platform:         os.Getenv("PLATFORM"),
 		secret:           os.Getenv("SECRET"),
 		polkaKey:         os.Getenv("POLKA_KEY"),
-		assetsRoot:       assetsRoot,
 		s3Bucket:         s3Bucket,
 		s3Region:         s3Region,
 		s3CfDistribution: s3CfDistribution,
 		s3Client:         myS3Client,
 	}
 	apiCfg.fileserverHits.Store(0)
-
-	// // First register the OPTIONS handler for API routes only
-	// mux.HandleFunc("OPTIONS /api/", func(w http.ResponseWriter, r *http.Request) {
-	// 	enableCors(&w)
-	// 	w.WriteHeader(http.StatusOK)
-	// })
 
 	// Then register the file server
 	fs := http.FileServer(http.Dir("./"))
@@ -480,14 +467,6 @@ func main() {
 		}
 
 		cleanText := goaway.Censor(params.Body)
-
-		// words := strings.Split(strings.TrimSpace(params.Body), " ")
-
-		// for i, word := range words {
-		// 	if strings.ToLower(word) == "kerfuffle" || strings.ToLower(word) == "sharbert" || strings.ToLower(word) == "fornax" {
-		// 		words[i] = "****"
-		// 	}
-		// }
 
 		// userUUID, err := uuid.Parse(params.UserID)
 		// if err != nil {
